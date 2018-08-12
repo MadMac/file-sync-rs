@@ -31,14 +31,51 @@ fn main() {
         panic!("Source or destination folder not found");
     }
 
-    let mut all_files: Vec<SyncFile> = Vec::new();
+    let source_files: Vec<SyncFile> = read_files(source);
+    let destination_files: Vec<SyncFile> = read_files(destination);
 
-    // Make SyncFiles from the source directory's files and save the data to vector
-    for entry in source.read_dir().expect("Reading the directory failed") {
+    // Start copying the files
+    for file in &source_files {
+        let mut is_same_file = false;
+
+        println!("Syncing file: {:?}", &file.path);
+
+        for dest_file in &destination_files {
+            if dest_file.file_name == file.file_name {
+                // check the modified times and sizes
+                if dest_file.size == file.size && dest_file.modified == file.modified {
+                    println!("Same file found: {:?}", &dest_file.path);
+
+                    is_same_file = true;
+                }
+            }
+        }
+
+        if !is_same_file {
+            let new_path = Path::new(destination).join(&file.file_name);
+            match fs::copy(&file.path, &new_path) {
+                Ok(_) => println!("Successfully copied: {:?}", &file.path),
+                Err(err) => println!("Error: {}", err),
+            }
+
+            // Set the accessed time and modified time to be the same as on the original file
+            match filetime::set_file_times(&new_path, file.access, file.modified) {
+                Ok(_) => println!("Successfully modified 'accessed' and 'modified' times"),
+                Err(err) => println!("Error: {}", err),
+            }
+        }
+    }
+
+    // println!("{:?}", source_files);
+}
+
+// Make SyncFiles from the source directory's files and save the data to vector
+fn read_files(directory: &Path) -> Vec<SyncFile> {
+    let mut result_vec: Vec<SyncFile> = Vec::new();
+
+    for entry in directory.read_dir().expect("Reading the directory failed") {
         if let Ok(entry) = entry {
             let file_metadata = fs::metadata(entry.path()).unwrap();
-
-            println!("{:?}", file_metadata.len());
 
             let temp_file = SyncFile {
                 file_name: entry.path().file_name().unwrap().to_os_string(),
@@ -48,24 +85,9 @@ fn main() {
                 size: file_metadata.len(),
             };
 
-            all_files.push(temp_file);
+            result_vec.push(temp_file);
         }
     }
 
-    // Start copying the files
-    for file in &all_files {
-        let new_path = Path::new(destination).join(&file.file_name);
-        match fs::copy(&file.path, &new_path) {
-            Ok(val) => println!("Successfully copied: {}", val),
-            Err(err) => println!("Error: {}", err),
-        }
-
-        // Set the accessed time and modified time to be the same as on the original file
-        match filetime::set_file_times(&new_path, file.access, file.modified) {
-            Ok(_) => println!("Successfully modified 'accessed' and 'modified' times"),
-            Err(err) => println!("Error: {}", err),
-        }
-    }
-
-    println!("{:?}", all_files);
+    result_vec
 }
