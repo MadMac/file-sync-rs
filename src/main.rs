@@ -16,6 +16,20 @@ struct SyncFile {
     size: u64,
 }
 
+#[derive(Debug)]
+#[derive(PartialEq, Eq)]
+enum ActionType {
+    CopyFile,
+    UpdateFile,
+    DeleteFile,
+}
+
+#[derive(Debug)]
+struct DiffFile<'a> {
+    file: &'a SyncFile, 
+    action: ActionType,
+}   
+
 fn main() {
     let args: Vec<_> = env::args().collect();
 
@@ -32,39 +46,110 @@ fn main() {
     }
 
     let source_files: Vec<SyncFile> = read_files(source);
-    let destination_files: Vec<SyncFile> = read_files(destination);
+    let mut destination_files: Vec<SyncFile> = read_files(destination);
 
-    // Start copying the files
+    // Stores the information about what actions needs to be done later
+    let mut diff_files: Vec<DiffFile> = Vec::new();
+
+    // Check the differences between the source folder and the destination
     for file in &source_files {
-        let mut is_same_file = false;
 
-        println!("Syncing file: {:?}", &file.path);
+        let mut file_exists_already = false;
+        let mut dest_file_index = 0;
 
-        for dest_file in &destination_files {
+        println!("Checking file: {:?}", &file.path);
+
+        // Check if the same file is already in destination
+        for (i, dest_file) in destination_files.iter().enumerate() {
+        //for dest_file in &destination_files {
             if dest_file.file_name == file.file_name {
+
+                file_exists_already = true;
+
                 // check the modified times and sizes
                 if dest_file.size == file.size && dest_file.modified == file.modified {
-                    println!("Same file found: {:?}", &dest_file.path);
+                    println!("No changes needed: {:?}", &dest_file.path);
+                    dest_file_index = i;
+                    break;
+                } else if file.modified > dest_file.modified {
+                    // Update needed
+                    let temp_diff = DiffFile {
+                        file: &file,
+                        action: ActionType::UpdateFile,
+                    };
+                    dest_file_index = i;
+                    diff_files.push(temp_diff);
 
-                    is_same_file = true;
+                    break;
                 }
             }
         }
 
-        if !is_same_file {
-            let new_path = Path::new(destination).join(&file.file_name);
-            match fs::copy(&file.path, &new_path) {
-                Ok(_) => println!("Successfully copied: {:?}", &file.path),
-                Err(err) => println!("Error: {}", err),
-            }
+        if !file_exists_already {
+            let temp_diff = DiffFile {
+                file: &file,
+                action: ActionType::CopyFile,
+            };
 
-            // Set the accessed time and modified time to be the same as on the original file
-            match filetime::set_file_times(&new_path, file.access, file.modified) {
-                Ok(_) => println!("Successfully modified 'accessed' and 'modified' times"),
-                Err(err) => println!("Error: {}", err),
-            }
+            diff_files.push(temp_diff);
+        } else {
+            destination_files.remove(dest_file_index);
         }
     }
+
+    for dest_file in &destination_files {
+        let temp_diff = DiffFile {
+            file: &dest_file,
+            action: ActionType::DeleteFile,
+        };
+
+        diff_files.push(temp_diff);
+    }
+
+    // Run the diffs
+    for diff in &diff_files {
+        println!("Diff: {:?}", &diff);
+
+        match diff.action {
+            ActionType::CopyFile | ActionType::UpdateFile => {
+                let new_path = Path::new(destination).join(&diff.file.file_name);
+                match fs::copy(&diff.file.path, &new_path) {
+                    Ok(_) => println!("Successfully copied: {:?}", diff.file.path),
+                    Err(err) => println!("Error: {}", err),
+                }
+
+                // Set the accessed time and modified time to be the same as on the original file
+                match filetime::set_file_times(&new_path, diff.file.access, diff.file.modified) {
+                    Ok(_) => println!("Successfully modified 'accessed' and 'modified' times"),
+                    Err(err) => println!("Error: {}", err),
+                }
+            },
+            ActionType::DeleteFile => {
+                let delete_path = Path::new(&diff.file.path);
+
+                // Make sure that the file/dir is still there
+                if delete_path.is_file() {
+                    println!("DELETE FILE: {:?}", delete_path);
+
+                    match fs::remove_file(delete_path) {
+                        Ok(_) => println!("Successfully deleted: {:?}", delete_path),
+                        Err(err) => println!("Error: {}", err),
+                    }
+                } 
+
+                if delete_path.is_dir() {
+                    println!("DELETE DIRECTORY: {:?}", delete_path);
+
+                    match fs::remove_dir(delete_path) {
+                        Ok(_) => println!("Successfully deleted: {:?}", delete_path),
+                        Err(err) => println!("Error: {}", err),
+                    }
+                }
+            }
+        }
+
+    }
+
 
     // println!("{:?}", source_files);
 }
