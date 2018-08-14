@@ -16,8 +16,7 @@ struct SyncFile {
     size: u64,
 }
 
-#[derive(Debug)]
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum ActionType {
     CopyFile,
     UpdateFile,
@@ -25,11 +24,11 @@ enum ActionType {
 }
 
 #[derive(Debug)]
-struct DiffFile<'a> {
-    file: &'a SyncFile, 
+struct DiffFile {
+    file: SyncFile,
     action: ActionType,
     is_directory: bool,
-}   
+}
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -46,28 +45,49 @@ fn main() {
         panic!("Source or destination folder not found");
     }
 
-    let source_files: Vec<SyncFile> = read_files(source);
-    let mut destination_files: Vec<SyncFile> = read_files(destination);
-
-    // Vector that stores the paths to the folders that have to be still looked
-    let mut folders_todo: Vec<OsString> = Vec::new();
 
     // Stores the information about what actions needs to be done later
     let mut diff_files: Vec<DiffFile> = Vec::new();
 
-    let (destination_files_add, mut diff_files_add) = make_diff(&source_files, destination_files.to_vec());
-    diff_files.append(&mut diff_files_add);
-    destination_files = destination_files_add.to_vec();
+    // Vector that stores the paths to the folders that have to be still looked
+    let mut folders_todo: Vec<OsString> = Vec::new();
+    let mut source_files: Vec<SyncFile> = Vec::new();
+    folders_todo.push(source.as_os_str().to_os_string());
 
-    for dest_file in &destination_files {
-        let temp_diff = DiffFile {
-            file: &dest_file,
-            action: ActionType::DeleteFile,
-            is_directory: Path::new(&dest_file.path).is_dir(),
-        };
+    loop {
 
-        diff_files.push(temp_diff);
+
+        if folders_todo.len() == 0 {
+            break;
+        }
+
+        let folder = folders_todo.remove(0);
+
+        let source_path = Path::new(&folder);
+
+        source_files = read_files(source_path);
+        let mut destination_files: Vec<SyncFile> = read_files(destination);
+
+        let (destination_files_add, mut diff_files_add, mut folders_todo_add) =
+            make_diff(source_files, destination_files.to_vec());
+        diff_files.append(&mut diff_files_add);
+        folders_todo.append(&mut folders_todo_add);
+        destination_files = destination_files_add.to_vec();
+        println!("destination files: {:?}", destination_files);
+        // for dest_file in &destination_files {
+        //     let temp_diff = DiffFile {
+        //         file: dest_file.clone(),
+        //         action: ActionType::DeleteFile,
+        //         is_directory: Path::new(&dest_file.path).is_dir(),
+        //     };
+
+        //     diff_files.push(temp_diff);
+        // }
+
+        println!("{:?}", folders_todo);
     }
+
+    // END RECURSION //
 
     // Run the diffs
     for diff in &diff_files {
@@ -81,7 +101,7 @@ fn main() {
                     match fs::create_dir(&new_path) {
                         Ok(_) => println!("Successfully made a new dir: {:?}", new_path),
                         Err(err) => println!("Error: {}", err),
-                    } 
+                    }
                 } else {
                     match fs::copy(&diff.file.path, &new_path) {
                         Ok(_) => println!("Successfully copied: {:?}", diff.file.path),
@@ -93,7 +113,7 @@ fn main() {
                     Ok(_) => println!("Successfully modified 'accessed' and 'modified' times"),
                     Err(err) => println!("Error: {}", err),
                 }
-            },
+            }
             ActionType::DeleteFile => {
                 let delete_path = Path::new(&diff.file.path);
 
@@ -105,7 +125,7 @@ fn main() {
                         Ok(_) => println!("Successfully deleted: {:?}", delete_path),
                         Err(err) => println!("Error: {}", err),
                     }
-                } 
+                }
 
                 if delete_path.is_dir() {
                     println!("DELETE DIRECTORY: {:?}", delete_path);
@@ -117,9 +137,7 @@ fn main() {
                 }
             }
         }
-
     }
-
 
     // println!("{:?}", source_files);
 }
@@ -147,23 +165,29 @@ fn read_files(directory: &Path) -> Vec<SyncFile> {
     result_vec
 }
 
-fn make_diff<'a>(source_files: &'a Vec<SyncFile>, _destination_files: Vec<SyncFile>) -> (Vec<SyncFile>, Vec<DiffFile<'a>>) {
-
+fn make_diff<'a>(
+    source_files: Vec<SyncFile>,
+    _destination_files: Vec<SyncFile>,
+) -> (Vec<SyncFile>, Vec<DiffFile>, Vec<OsString>) {
     let mut diff_files = Vec::new();
     let mut destination_files = _destination_files.to_vec();
+    let mut directories_todo = Vec::new();
+
     // Check the differences between the source folder and the destination
     for file in source_files {
-
         let mut file_exists_already = false;
         let mut dest_file_index = 0;
         let is_directory = Path::new(&file.path).is_dir();
 
         println!("Checking file: {:?}", &file.path);
 
+        if is_directory {
+            directories_todo.push(file.path.to_os_string());
+        }
+
         // Check if the same file is already in destination
         for (i, dest_file) in destination_files.iter().enumerate() {
             if dest_file.file_name == file.file_name {
-
                 file_exists_already = true;
 
                 // check the modified times and sizes
@@ -174,7 +198,7 @@ fn make_diff<'a>(source_files: &'a Vec<SyncFile>, _destination_files: Vec<SyncFi
                 } else if file.modified > dest_file.modified {
                     // Update needed
                     let temp_diff = DiffFile {
-                        file: &file,
+                        file: file.clone(),
                         action: ActionType::UpdateFile,
                         is_directory: is_directory,
                     };
@@ -187,9 +211,8 @@ fn make_diff<'a>(source_files: &'a Vec<SyncFile>, _destination_files: Vec<SyncFi
         }
 
         if !file_exists_already {
-
             let temp_diff = DiffFile {
-                file: &file,
+                file: file.clone(),
                 action: ActionType::CopyFile,
                 is_directory: is_directory,
             };
@@ -200,6 +223,5 @@ fn make_diff<'a>(source_files: &'a Vec<SyncFile>, _destination_files: Vec<SyncFi
         }
     }
 
-    (destination_files, diff_files)
-
+    (destination_files, diff_files, directories_todo)
 }
