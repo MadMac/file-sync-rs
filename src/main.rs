@@ -52,6 +52,7 @@ fn main() {
     let mut folders_todo: Vec<OsString> = Vec::new();
     folders_todo.push(source.as_os_str().to_os_string());
 
+    // Recursively go through all the folders and make the diffs
     loop {
         if folders_todo.len() == 0 {
             break;
@@ -84,8 +85,6 @@ fn main() {
         }
 
     }
-
-    // END RECURSION //
 
     // Run the diffs
     for diff in &diff_files {
