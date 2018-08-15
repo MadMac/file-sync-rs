@@ -45,18 +45,14 @@ fn main() {
         panic!("Source or destination folder not found");
     }
 
-
     // Stores the information about what actions needs to be done later
     let mut diff_files: Vec<DiffFile> = Vec::new();
 
     // Vector that stores the paths to the folders that have to be still looked
     let mut folders_todo: Vec<OsString> = Vec::new();
-    let mut source_files: Vec<SyncFile> = Vec::new();
     folders_todo.push(source.as_os_str().to_os_string());
 
     loop {
-
-
         if folders_todo.len() == 0 {
             break;
         }
@@ -64,27 +60,29 @@ fn main() {
         let folder = folders_todo.remove(0);
 
         let source_path = Path::new(&folder);
+        let destination_path_without = source_path.strip_prefix(source).unwrap();
+        let destination_path = destination.join(destination_path_without);
+ 
+        let source_files = read_files(source_path, source);
 
-        source_files = read_files(source_path);
-        let mut destination_files: Vec<SyncFile> = read_files(destination);
+        let mut destination_files: Vec<SyncFile> = read_files(&destination_path, destination);
 
         let (destination_files_add, mut diff_files_add, mut folders_todo_add) =
             make_diff(source_files, destination_files.to_vec());
         diff_files.append(&mut diff_files_add);
         folders_todo.append(&mut folders_todo_add);
         destination_files = destination_files_add.to_vec();
-        println!("destination files: {:?}", destination_files);
-        // for dest_file in &destination_files {
-        //     let temp_diff = DiffFile {
-        //         file: dest_file.clone(),
-        //         action: ActionType::DeleteFile,
-        //         is_directory: Path::new(&dest_file.path).is_dir(),
-        //     };
 
-        //     diff_files.push(temp_diff);
-        // }
+        for dest_file in &destination_files {
+            let temp_diff = DiffFile {
+                file: dest_file.clone(),
+                action: ActionType::DeleteFile,
+                is_directory: Path::new(&dest_file.path).is_dir(),
+            };
 
-        println!("{:?}", folders_todo);
+            diff_files.push(temp_diff);
+        }
+
     }
 
     // END RECURSION //
@@ -143,22 +141,29 @@ fn main() {
 }
 
 // Make SyncFiles from the source directory's files and save the data to vector
-fn read_files(directory: &Path) -> Vec<SyncFile> {
+fn read_files(directory: &Path, prefix: &Path) -> Vec<SyncFile> {
     let mut result_vec: Vec<SyncFile> = Vec::new();
 
-    for entry in directory.read_dir().expect("Reading the directory failed") {
-        if let Ok(entry) = entry {
-            let file_metadata = fs::metadata(entry.path()).unwrap();
+    if directory.is_dir() {
+        for entry in directory.read_dir().expect("Reading the directory failed") {
+            if let Ok(entry) = entry {
+                let file_metadata = fs::metadata(entry.path()).unwrap();
 
-            let temp_file = SyncFile {
-                file_name: entry.path().file_name().unwrap().to_os_string(),
-                path: entry.path().into_os_string(),
-                access: FileTime::from_last_access_time(&file_metadata),
-                modified: FileTime::from_last_modification_time(&file_metadata),
-                size: file_metadata.len(),
-            };
+                let temp_file = SyncFile {
+                    file_name: entry
+                        .path()
+                        .strip_prefix(prefix)
+                        .unwrap()
+                        .as_os_str()
+                        .to_os_string(),
+                    path: entry.path().into_os_string(),
+                    access: FileTime::from_last_access_time(&file_metadata),
+                    modified: FileTime::from_last_modification_time(&file_metadata),
+                    size: file_metadata.len(),
+                };
 
-            result_vec.push(temp_file);
+                result_vec.push(temp_file);
+            }
         }
     }
 
